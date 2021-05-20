@@ -8,8 +8,8 @@
 #define AWS_IOT_PUBLISH_TOPIC   "esp32/pub"
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub"
 
-#define AWS_IOT_SHADOW_PUBLISH_TOPIC   "$aws/things/ESP32/shadow/update"
-#define AWS_IOT_SHADOW_SUBSCRIBE_TOPIC "$aws/things/ESP32/shadow/update/delta"
+#define AWS_IOT_SHADOW_PUBLISH_TOPIC   "$aws/things/esp32-apha-1/shadow/update"
+#define AWS_IOT_SHADOW_SUBSCRIBE_TOPIC "$aws/things/esp32-apha-1/shadow/update/delta"
 
 int msgReceived = 0;
 String rcvdPayload;
@@ -24,11 +24,15 @@ const float th1_inv_beta = 0.0002569;
 const float th2_inv_beta = 0.0002898;
 const int average_num = 10;
 const float adc_offset = 0.18;
-WiFiClientSecure net = WiFiClientSecure();
+WiFiClientSecure net = WiFiClientSecure(); 
 MQTTClient client = MQTTClient(256);
 
 
-void messageHandler(String &topic, String &payload);
+void messageHandler(String &topic, String &payload) {
+  Serial.println("incoming: " + topic + " - " + payload);
+  msgReceived = 1;
+  rcvdPayload = payload;
+}
 
 void connectAWS()
 {
@@ -54,7 +58,7 @@ void connectAWS()
   // Create a message handler
   client.onMessage(messageHandler);
 
-  Serial.print("Connecting to AWS IOT");
+  Serial.println("Connecting to AWS IOT");
 
   while (!client.connect(THINGNAME)) {
     Serial.print(".");
@@ -107,20 +111,13 @@ void publishMessage(float temp1, float temp2, String action)
   client.publish(AWS_IOT_PUBLISH_TOPIC, jsonBuffer);
 }
 
-void messageHandler(String &topic, String &payload) {
-  Serial.println("incoming: " + topic + " - " + payload);
-  msgReceived = 1;
-  rcvdPayload = payload;
 
-//  StaticJsonDocument<200> doc;
-//  deserializeJson(doc, payload);
-//  const char* message = doc["message"];
-}
+
 
 void setup() {
   Serial.begin(9600);
-  sprintf(sndPayloadOn,"{\"state\": { \"reported\": { \"status\": \"on\" } }}");
-  sprintf(sndPayloadOff,"{\"state\": { \"reported\": { \"status\": \"off\" } }}");
+  sprintf(sndPayloadOn,"{\"state\": {\"reported\":{\"status\": \"on\" }}}");
+  sprintf(sndPayloadOff,"{\"state\":{\"reported\":{\"status\": \"off\" }}}");
   connectAWS();
   Serial.println("Setting Lamp Status to Off");
   client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOff);
@@ -148,22 +145,22 @@ void loop() {
          Serial.println("IF CONDITION");
          Serial.println("Turning Relay On");
          digitalWrite(RELAY, HIGH);
-         client.publish(AWS_IOT_PUBLISH_TOPIC, sndPayloadOn);
+         client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOn);
         }
         else 
         {
          Serial.println("ELSE CONDITION");
          Serial.println("Turning RElay Off");
          digitalWrite(RELAY, LOW);
-         client.publish(AWS_IOT_PUBLISH_TOPIC, sndPayloadOff);
+         client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOff);
         }
       Serial.println("##############################################");
     }
 
-  float temp1 = getTemp(TH1,th1_inv_beta);
-  float temp2 = getTemp(TH2,th2_inv_beta); 
-  publishMessage(temp1,temp2,"update");
+  // float temp1 = getTemp(TH1,th1_inv_beta);
+  // float temp2 = getTemp(TH2,th2_inv_beta); 
+  // publishMessage(temp1,temp2,"update");
 
   client.loop();
-  delay(5000);
+  delay(1000);
 }
