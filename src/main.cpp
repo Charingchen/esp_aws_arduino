@@ -5,11 +5,11 @@
 #include "WiFi.h"
 
 // The MQTT topics that this device should publish/subscribe
-#define AWS_IOT_PUBLISH_TOPIC   "esp32/pub"
+#define TEMP_TOPIC   "esp32/temp"
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub"
 
-#define AWS_IOT_SHADOW_PUBLISH_TOPIC   "$aws/things/esp32-apha-1/shadow/update"
-#define AWS_IOT_SHADOW_SUBSCRIBE_TOPIC "$aws/things/esp32-apha-1/shadow/update/delta"
+#define AWS_IOT_SHADOW_PUBLISH_TOPIC   "$aws/things/" THINGNAME "/shadow/update"
+#define AWS_IOT_SHADOW_SUBSCRIBE_TOPIC "$aws/things/" THINGNAME "/shadow/update/delta"
 
 int msgReceived = 0;
 String rcvdPayload;
@@ -108,7 +108,7 @@ void publishMessage(float temp1, float temp2, String action)
   char jsonBuffer[512];
   serializeJson(doc, jsonBuffer); // print to client
 
-  client.publish(AWS_IOT_PUBLISH_TOPIC, jsonBuffer);
+  client.publish(TEMP_TOPIC, jsonBuffer);
 }
 
 
@@ -157,10 +157,10 @@ void loop() {
       Serial.println("##############################################");
     }
 
-  // float temp1 = getTemp(TH1,th1_inv_beta);
-  // float temp2 = getTemp(TH2,th2_inv_beta); 
-  // publishMessage(temp1,temp2,"update");
+  float temp1 = getTemp(TH1,th1_inv_beta);
+  float temp2 = getTemp(TH2,th2_inv_beta); 
+  publishMessage(temp1,temp2,"update");
 
   client.loop();
-  delay(1000);
+  delay(5000);
 }
