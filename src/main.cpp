@@ -12,6 +12,8 @@
 #define AWS_IOT_SHADOW_SUBSCRIBE_TOPIC "$aws/things/" THINGNAME "/shadow/update/delta"
 
 int msgReceived = 0;
+bool first_temp = true;
+float prev_temp = 0;
 String rcvdPayload;
 char sndPayloadOff[512];
 char sndPayloadOn[512];
@@ -84,16 +86,16 @@ float getTemp (int pin_name,float inv_beta)
   }
   average_read /= average_num;
   float voltage = average_read*3.3 / 4096 + adc_offset;
-  Serial.print(pin_name);
-  Serial.print('\t');
-  Serial.print("Voltage: ");
-  Serial.print(voltage);
-  Serial.print('\t');
+  // Serial.print(pin_name);
+  // Serial.print('\t');
+  // Serial.print("Voltage: ");
+  // Serial.print(voltage);
+  // Serial.print('\t');
   float r = (10000 * voltage) / (3.3-voltage);
   float temp = 1/(0.003354 + inv_beta * log(r/10000))-273.15;
-  Serial.print("temp: ");
-  Serial.println(temp);
-  Serial.print('\n');
+  // Serial.print("temp: ");
+  // Serial.println(temp);
+  // Serial.print('\n');
   return temp;
 }
 
@@ -107,7 +109,7 @@ void publishMessage(float temp1, float temp2, String action)
 
   char jsonBuffer[512];
   serializeJson(doc, jsonBuffer); // print to client
-
+  Serial.println(jsonBuffer);
   client.publish(TEMP_TOPIC, jsonBuffer);
 }
 
@@ -121,6 +123,8 @@ void setup() {
   connectAWS();
   Serial.println("Setting Lamp Status to Off");
   client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOff);
+  pinMode(RELAY,OUTPUT);
+  digitalWrite(RELAY, LOW);
   
   Serial.println("##############################################");
 }
@@ -159,8 +163,20 @@ void loop() {
 
   float temp1 = getTemp(TH1,th1_inv_beta);
   float temp2 = getTemp(TH2,th2_inv_beta); 
-  publishMessage(temp1,temp2,"update");
+  // Check the temp and update if it different than before
+  if (first_temp){
+      publishMessage(temp1,temp2,"initial");
+      first_temp = false;
+      prev_temp = temp1;
+  }
+  else{
+    if (temp1 > prev_temp * 1.05 || temp1 < prev_temp * 0.95) {
+      publishMessage(temp1,temp2,"update");
+      prev_temp = temp1;
+    }
+  }
+    
 
   client.loop();
-  delay(5000);
+  delay(500);
 }
