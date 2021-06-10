@@ -18,9 +18,10 @@ String rcvdPayload;
 char sndPayloadOff[512];
 char sndPayloadOn[512];
 
-#define TH1 34
+#define LIGHT 34
 #define TH2 35
 #define RELAY 33
+#define MOTION 32
 
 const float th1_inv_beta = 0.0002569;
 const float th2_inv_beta = 0.0002898;
@@ -99,18 +100,24 @@ float getTemp (int pin_name,float inv_beta)
   return temp;
 }
 
-void publishMessage(float temp1, float temp2, String action)
+void publishMessage(float temp1, float temp2, String action, bool motion)
 {
   StaticJsonDocument<200> doc;
   doc["time"] = millis();
   doc["action"] = action;
-  doc["TH1 Temp"] = temp1;
-  doc["TH2 Temp"] = temp2;
+  doc["Ambient Light Sensor"] = temp1;
+  doc["PCB temp Sensor"] = temp2;
+  doc["Motion"] = motion;
 
   char jsonBuffer[512];
   serializeJson(doc, jsonBuffer); // print to client
   Serial.println(jsonBuffer);
   client.publish(TEMP_TOPIC, jsonBuffer);
+}
+
+float amb_light_read (){
+  float raw_amb_read = analogRead(LIGHT);
+  return raw_amb_read;
 }
 
 
@@ -125,6 +132,7 @@ void setup() {
   client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOff);
   pinMode(RELAY,OUTPUT);
   digitalWrite(RELAY, LOW);
+
   
   Serial.println("##############################################");
 }
@@ -160,19 +168,19 @@ void loop() {
         }
       Serial.println("##############################################");
     }
-
-  float temp1 = getTemp(TH1,th1_inv_beta);
+  float light = amb_light_read();
   float temp2 = getTemp(TH2,th2_inv_beta); 
+  bool reading_motion = digitalRead(MOTION);
   // Check the temp and update if it different than before
   if (first_temp){
-      publishMessage(temp1,temp2,"initial");
+      publishMessage(light,temp2,"initial",reading_motion);
       first_temp = false;
-      prev_temp = temp1;
+      prev_temp = temp2;
   }
   else{
-    if (temp1 > prev_temp * 1.05 || temp1 < prev_temp * 0.95) {
-      publishMessage(temp1,temp2,"update");
-      prev_temp = temp1;
+    if (temp2 > prev_temp * 1.05 || temp2 < prev_temp * 0.95|| reading_motion) {
+      publishMessage(light,temp2,"update",reading_motion);
+      prev_temp = temp2;
     }
   }
     
