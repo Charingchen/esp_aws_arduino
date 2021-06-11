@@ -5,7 +5,7 @@
 #include "WiFi.h"
 
 // The MQTT topics that this device should publish/subscribe
-#define TEMP_TOPIC   "esp32/temp"
+#define STATUS_TOPIC   "esp32/" THINGNAME "/status"
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub"
 
 #define AWS_IOT_SHADOW_PUBLISH_TOPIC   "$aws/things/" THINGNAME "/shadow/update"
@@ -14,6 +14,8 @@
 int msgReceived = 0;
 bool first_temp = true;
 float prev_temp = 0;
+bool prev_motion = false;
+bool button_state = false;
 String rcvdPayload;
 char sndPayloadOff[512];
 char sndPayloadOn[512];
@@ -22,6 +24,7 @@ char sndPayloadOn[512];
 #define TH2 35
 #define RELAY 33
 #define MOTION 32
+#define PUSH_BUTTON 27
 
 const float th1_inv_beta = 0.0002569;
 const float th2_inv_beta = 0.0002898;
@@ -106,13 +109,13 @@ void publishMessage(float temp1, float temp2, String action, bool motion)
   doc["time"] = millis();
   doc["action"] = action;
   doc["Ambient Light Sensor"] = temp1;
-  doc["PCB temp Sensor"] = temp2;
-  doc["Motion"] = motion;
+  doc["pcb temp Sensor"] = temp2;
+  doc["motion"] = motion;
 
   char jsonBuffer[512];
   serializeJson(doc, jsonBuffer); // print to client
   Serial.println(jsonBuffer);
-  client.publish(TEMP_TOPIC, jsonBuffer);
+  client.publish(STATUS_TOPIC, jsonBuffer);
 }
 
 float amb_light_read (){
@@ -131,6 +134,9 @@ void setup() {
   Serial.println("Setting Lamp Status to Off");
   client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOff);
   pinMode(RELAY,OUTPUT);
+  pinMode(MOTION,INPUT);
+  pinMode(PUSH_BUTTON,INPUT);
+  
   digitalWrite(RELAY, LOW);
 
   
@@ -168,6 +174,19 @@ void loop() {
         }
       Serial.println("##############################################");
     }
+  
+  // Dectect Push button and toggle relays
+  if(digitalRead(PUSH_BUTTON) == HIGH){
+    button_state = !button_state;
+  }
+
+  if(button_state == true){
+    Serial.println("PUSHED Button");
+    Serial.println("Turning Relay On");
+    digitalWrite(RELAY, HIGH);
+    client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOn);
+    }
+
   float light = amb_light_read();
   float temp2 = getTemp(TH2,th2_inv_beta); 
   bool reading_motion = digitalRead(MOTION);
@@ -175,12 +194,14 @@ void loop() {
   if (first_temp){
       publishMessage(light,temp2,"initial",reading_motion);
       first_temp = false;
-      prev_temp = temp2;
+      prev_temp = light;
+      prev_motion = reading_motion;
   }
   else{
-    if (temp2 > prev_temp * 1.05 || temp2 < prev_temp * 0.95|| reading_motion) {
+    if (light > prev_temp * 1.05 || light < prev_temp * 0.95|| prev_motion != reading_motion) {
       publishMessage(light,temp2,"update",reading_motion);
-      prev_temp = temp2;
+      prev_temp = light;
+      prev_motion = reading_motion;
     }
   }
     
