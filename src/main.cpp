@@ -5,7 +5,7 @@
 #include "WiFi.h"
 
 // The MQTT topics that this device should publish/subscribe
-#define STATUS_TOPIC   "esp32/" THINGNAME "/status"
+#define STATUS_TOPIC   "esp32/temp"
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub"
 
 #define AWS_IOT_SHADOW_PUBLISH_TOPIC   "$aws/things/" THINGNAME "/shadow/update"
@@ -14,8 +14,14 @@
 int msgReceived = 0;
 bool first_temp = true;
 float prev_temp = 0;
+float prev_light = 0;
 bool prev_motion = false;
-bool button_state = false;
+int button_state;
+int lastButtonState = LOW;
+int relay_state = LOW;
+unsigned long lastDebounceTime = 0;  // the last time the output pin was toggled
+unsigned long debounceDelay = 50;    // the debounce time; increase if the output flickers
+
 String rcvdPayload;
 char sndPayloadOff[512];
 char sndPayloadOn[512];
@@ -137,12 +143,53 @@ void setup() {
   pinMode(MOTION,INPUT);
   pinMode(PUSH_BUTTON,INPUT);
   
+  relay_state = LOW;
   digitalWrite(RELAY, LOW);
 
   
   Serial.println("##############################################");
 }
 
+void button_detect (){
+  int reading = digitalRead(PUSH_BUTTON);
+  // If the switch changed, due to noise or pressing:
+
+  // Debug note: change the reading to push to aws to debug.
+  if (reading != lastButtonState) {
+    // reset the debouncing timer
+    lastDebounceTime = millis();
+  }
+
+  if ((millis() - lastDebounceTime) > debounceDelay) {
+    // whatever the reading is at, it's been there for longer than the debounce
+    // delay, so take it as the actual current state:
+
+    // if the button state has changed:
+    if (reading != button_state) {
+      button_state = reading;
+
+      // only toggle the LED if the new button state is HIGH
+      if (button_state == LOW) {
+        relay_state = !relay_state;
+      }
+
+      if(relay_state == HIGH){
+      Serial.println("PUSHED Button");
+      Serial.println("Turning Relay On");
+      digitalWrite(RELAY, HIGH);
+      // client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOn);
+      }
+      else{
+        Serial.println("PUSHED Button again");
+        Serial.println("Turning Relay Off");
+        digitalWrite(RELAY, LOW);
+        // client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOff);
+      }
+    }
+  }
+  // save the reading. Next time through the loop, it'll be the lastButtonState:
+  lastButtonState = reading;
+}
 void loop() {
   if(msgReceived == 1)
     {
@@ -175,17 +222,7 @@ void loop() {
       Serial.println("##############################################");
     }
   
-  // Dectect Push button and toggle relays
-  if(digitalRead(PUSH_BUTTON) == HIGH){
-    button_state = !button_state;
-  }
-
-  if(button_state == true){
-    Serial.println("PUSHED Button");
-    Serial.println("Turning Relay On");
-    digitalWrite(RELAY, HIGH);
-    client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOn);
-    }
+  button_detect();
 
   float light = amb_light_read();
   float temp2 = getTemp(TH2,th2_inv_beta); 
@@ -194,13 +231,16 @@ void loop() {
   if (first_temp){
       publishMessage(light,temp2,"initial",reading_motion);
       first_temp = false;
-      prev_temp = light;
+      prev_light = light;
+      prev_temp = temp2;
       prev_motion = reading_motion;
   }
   else{
-    if (light > prev_temp * 1.05 || light < prev_temp * 0.95|| prev_motion != reading_motion) {
+    if (light > prev_light * 1.05 || light < prev_light * 0.95|| prev_motion != reading_motion 
+    || temp2 > prev_temp * 1.05 || temp2 < prev_temp * 0.95) {
       publishMessage(light,temp2,"update",reading_motion);
-      prev_temp = light;
+      prev_temp = temp2;
+      prev_light = light;
       prev_motion = reading_motion;
     }
   }
