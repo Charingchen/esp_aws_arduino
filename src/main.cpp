@@ -173,21 +173,23 @@ void button_detect (){
         relay_state = !relay_state;
       }
 
-      if(relay_state == HIGH){
-      Serial.println("PUSHED Button");
-      Serial.println("Turning Relay On");
-      digitalWrite(RELAY, HIGH);
-      // client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOn);
-      }
-      else{
-        Serial.println("PUSHED Button again");
-        Serial.println("Turning Relay Off");
-        digitalWrite(RELAY, LOW);
-        // client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOff);
-      }
+
+      // if(relay_state == HIGH){
+      // Serial.println("PUSHED Button");
+      // Serial.println("Turning Relay On");
+      // digitalWrite(RELAY, HIGH);
+      // // client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOn);
+      // }
+      // else{
+      //   Serial.println("PUSHED Button again");
+      //   Serial.println("Turning Relay Off");
+      //   digitalWrite(RELAY, LOW);
+      //   // client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOff);
+      // }
     }
   }
   // save the reading. Next time through the loop, it'll be the lastButtonState:
+  digitalWrite(RELAY,relay_state);
   lastButtonState = reading;
 }
 void loop() {
@@ -224,26 +226,38 @@ void loop() {
   
   button_detect();
 
-  float light = amb_light_read();
-  float temp2 = getTemp(TH2,th2_inv_beta); 
-  bool reading_motion = digitalRead(MOTION);
-  // Check the temp and update if it different than before
-  if (first_temp){
-      publishMessage(light,temp2,"initial",reading_motion);
-      first_temp = false;
-      prev_light = light;
-      prev_temp = temp2;
-      prev_motion = reading_motion;
-  }
-  else{
-    if (light > prev_light * 1.05 || light < prev_light * 0.95|| prev_motion != reading_motion 
-    || temp2 > prev_temp * 1.05 || temp2 < prev_temp * 0.95) {
-      publishMessage(light,temp2,"update",reading_motion);
-      prev_temp = temp2;
-      prev_light = light;
-      prev_motion = reading_motion;
-    }
-  }
+  int reading = digitalRead(PUSH_BUTTON);
+  StaticJsonDocument<200> doc;
+  doc["time"] = millis();
+  doc["push button"] = reading;
+
+  char jsonBuffer[512];
+  serializeJson(doc, jsonBuffer); // print to client
+  Serial.println(jsonBuffer);
+  client.publish(STATUS_TOPIC, jsonBuffer);
+
+
+
+  // float light = amb_light_read();
+  // float temp2 = getTemp(TH2,th2_inv_beta); 
+  // bool reading_motion = digitalRead(MOTION);
+  // // Check the temp and update if it different than before
+  // if (first_temp){
+  //     publishMessage(light,temp2,"initial",reading_motion);
+  //     first_temp = false;
+  //     prev_light = light;
+  //     prev_temp = temp2;
+  //     prev_motion = reading_motion;
+  // }
+  // else{
+  //   if (light > prev_light * 1.05 || light < prev_light * 0.95|| prev_motion != reading_motion 
+  //   || temp2 > prev_temp * 1.05 || temp2 < prev_temp * 0.95) {
+  //     publishMessage(light,temp2,"update",reading_motion);
+  //     prev_temp = temp2;
+  //     prev_light = light;
+  //     prev_motion = reading_motion;
+  //   }
+  // }
     
 
   client.loop();
