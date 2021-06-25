@@ -12,15 +12,9 @@
 #define AWS_IOT_SHADOW_SUBSCRIBE_TOPIC "$aws/things/" THINGNAME "/shadow/update/delta"
 
 int msgReceived = 0;
-bool first_temp = true;
-float prev_temp = 0;
-float prev_light = 0;
-bool prev_motion = false;
-int button_state;
-int lastButtonState = LOW;
-int relay_state = LOW;
-unsigned long lastDebounceTime = 0;  // the last time the output pin was toggled
-unsigned long debounceDelay = 50;    // the debounce time; increase if the output flickers
+
+int button_count = 0;
+volatile byte button_state = LOW;
 
 String rcvdPayload;
 char sndPayloadOff[512];
@@ -39,6 +33,17 @@ const float adc_offset = 0.18;
 WiFiClientSecure net = WiFiClientSecure(); 
 MQTTClient client = MQTTClient(256);
 
+struct SwitchData
+{
+  bool init = false;
+  float light;
+  float temp;
+  bool motion;
+  int button_state;
+  int button_count;
+};
+
+SwitchData switch1;
 
 void messageHandler(String &topic, String &payload) {
   Serial.println("incoming: " + topic + " - " + payload);
@@ -109,15 +114,16 @@ float getTemp (int pin_name,float inv_beta)
   return temp;
 }
 
-void publishMessage(float temp1, float temp2, String action, bool motion)
+void publishMessage(SwitchData data)
 {
   StaticJsonDocument<200> doc;
   doc["time"] = millis();
-  doc["action"] = action;
-  doc["Ambient Light Sensor"] = temp1;
-  doc["pcb temp Sensor"] = temp2;
-  doc["motion"] = motion;
 
+  doc["Ambient Light Sensor"] = data.light;
+  doc["PCB Temp Sensor"] = data.temp;
+  doc["motion"] = data.motion;
+  doc["button state"] = data.button_state;
+  doc["button count"] = data.button_count;
   char jsonBuffer[512];
   serializeJson(doc, jsonBuffer); // print to client
   Serial.println(jsonBuffer);
@@ -129,8 +135,39 @@ float amb_light_read (){
   return raw_amb_read;
 }
 
+void IRAM_ATTR isr(){
+  button_count += 1;
+  button_state = !button_state;
+}
 
+void data_update (){
+  float light_read = amb_light_read();
+  float temp_read = getTemp(TH2,th2_inv_beta); 
+  bool motion_read = digitalRead(MOTION);
 
+  // Check if first time update data
+  if (!switch1.init){
+      switch1.init = true;
+      switch1.light = light_read;
+      switch1.temp = temp_read;
+      switch1.motion = motion_read;
+      switch1.button_state = button_state;
+      switch1.button_count = button_count;
+      
+  }
+  else{
+    if (light_read > switch1.light * 1.05 || light_read < switch1.light* 0.95|| switch1.motion != motion_read 
+    || temp_read > switch1.temp * 1.05 || temp_read < switch1.temp * 0.95 || switch1.button_state != button_state) {
+ 
+      switch1.light = light_read;
+      switch1.temp = temp_read;
+      switch1.motion = motion_read;
+      switch1.button_state = button_state;
+      switch1.button_count = button_count;
+    }
+  }
+
+}
 
 void setup() {
   Serial.begin(9600);
@@ -143,55 +180,14 @@ void setup() {
   pinMode(MOTION,INPUT);
   pinMode(PUSH_BUTTON,INPUT);
   
-  relay_state = LOW;
-  digitalWrite(RELAY, LOW);
 
+  // Create interrupts for the push the
+  attachInterrupt(PUSH_BUTTON,isr,FALLING);
   
   Serial.println("##############################################");
 }
 
-void button_detect (){
-  int reading = digitalRead(PUSH_BUTTON);
-  // If the switch changed, due to noise or pressing:
 
-  // Debug note: change the reading to push to aws to debug.
-  if (reading != lastButtonState) {
-    // reset the debouncing timer
-    lastDebounceTime = millis();
-  }
-
-  if ((millis() - lastDebounceTime) > debounceDelay) {
-    // whatever the reading is at, it's been there for longer than the debounce
-    // delay, so take it as the actual current state:
-
-    // if the button state has changed:
-    if (reading != button_state) {
-      button_state = reading;
-
-      // only toggle the LED if the new button state is HIGH
-      if (button_state == LOW) {
-        relay_state = !relay_state;
-      }
-
-
-      // if(relay_state == HIGH){
-      // Serial.println("PUSHED Button");
-      // Serial.println("Turning Relay On");
-      // digitalWrite(RELAY, HIGH);
-      // // client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOn);
-      // }
-      // else{
-      //   Serial.println("PUSHED Button again");
-      //   Serial.println("Turning Relay Off");
-      //   digitalWrite(RELAY, LOW);
-      //   // client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOff);
-      // }
-    }
-  }
-  // save the reading. Next time through the loop, it'll be the lastButtonState:
-  digitalWrite(RELAY,relay_state);
-  lastButtonState = reading;
-}
 void loop() {
   if(msgReceived == 1)
     {
@@ -211,54 +207,44 @@ void loop() {
         {
          Serial.println("IF CONDITION");
          Serial.println("Turning Relay On");
-         digitalWrite(RELAY, HIGH);
-         client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOn);
+         button_state = HIGH;
+        //  client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOn);
         }
         else 
         {
          Serial.println("ELSE CONDITION");
          Serial.println("Turning RElay Off");
-         digitalWrite(RELAY, LOW);
-         client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOff);
+         button_state = LOW;
+        //  client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOff);
         }
       Serial.println("##############################################");
     }
   
-  button_detect();
+  // int reading = digitalRead(PUSH_BUTTON);
+  // digitalWrite(RELAY,button_state);
+  // StaticJsonDocument<200> doc;
+  // doc["time"] = millis();
+  // doc["push button"] = reading;
+  // doc["count"] = button_count;
+  // doc["button state"] = button_state;
+  // char jsonBuffer[512];
+  // serializeJson(doc, jsonBuffer); // print to client
+  // Serial.println(jsonBuffer);
+  // client.publish(STATUS_TOPIC, jsonBuffer);
 
-  int reading = digitalRead(PUSH_BUTTON);
-  StaticJsonDocument<200> doc;
-  doc["time"] = millis();
-  doc["push button"] = reading;
-
-  char jsonBuffer[512];
-  serializeJson(doc, jsonBuffer); // print to client
-  Serial.println(jsonBuffer);
-  client.publish(STATUS_TOPIC, jsonBuffer);
-
-
-
-  // float light = amb_light_read();
-  // float temp2 = getTemp(TH2,th2_inv_beta); 
-  // bool reading_motion = digitalRead(MOTION);
-  // // Check the temp and update if it different than before
-  // if (first_temp){
-  //     publishMessage(light,temp2,"initial",reading_motion);
-  //     first_temp = false;
-  //     prev_light = light;
-  //     prev_temp = temp2;
-  //     prev_motion = reading_motion;
-  // }
-  // else{
-  //   if (light > prev_light * 1.05 || light < prev_light * 0.95|| prev_motion != reading_motion 
-  //   || temp2 > prev_temp * 1.05 || temp2 < prev_temp * 0.95) {
-  //     publishMessage(light,temp2,"update",reading_motion);
-  //     prev_temp = temp2;
-  //     prev_light = light;
-  //     prev_motion = reading_motion;
-  //   }
-  // }
-    
+ 
+// toggle relay base on its state
+ digitalWrite(RELAY,button_state);
+ // Update shadows according to the button state
+ if (button_state != switch1.button_state){
+    if (button_state == HIGH) {
+    client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOn);
+ }
+    else client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOff);
+ }
+ 
+  data_update();
+  publishMessage(switch1);
 
   client.loop();
   delay(500);
