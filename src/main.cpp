@@ -19,7 +19,8 @@ volatile byte button_state = LOW;
 String rcvdPayload;
 char sndPayloadOff[512];
 char sndPayloadOn[512];
-
+char onByButton[]= "{\"state\":{\"desired\":{\"status\": \"on\" }}}";
+char offByButton[]= "{\"state\":{\"desired\":{\"status\": \"off\" }}}";
 #define LIGHT 34
 #define TH2 35
 #define RELAY 33
@@ -41,6 +42,7 @@ struct SwitchData
   bool motion;
   int button_state;
   int button_count;
+  int msg_recv = 0;
 };
 
 SwitchData switch1;
@@ -124,9 +126,10 @@ void publishMessage(SwitchData data)
   doc["motion"] = data.motion;
   doc["button state"] = data.button_state;
   doc["button count"] = data.button_count;
+  doc["msg Received"] = data.msg_recv;
   char jsonBuffer[512];
   serializeJson(doc, jsonBuffer); // print to client
-  Serial.println(jsonBuffer);
+  // Serial.println(jsonBuffer);
   client.publish(STATUS_TOPIC, jsonBuffer);
 }
 
@@ -140,7 +143,7 @@ void IRAM_ATTR isr(){
   button_state = !button_state;
 }
 
-void data_update (){
+bool data_update (){
   float light_read = amb_light_read();
   float temp_read = getTemp(TH2,th2_inv_beta); 
   bool motion_read = digitalRead(MOTION);
@@ -153,7 +156,8 @@ void data_update (){
       switch1.motion = motion_read;
       switch1.button_state = button_state;
       switch1.button_count = button_count;
-      
+
+      return true;
   }
   else{
     if (light_read > switch1.light * 1.05 || light_read < switch1.light* 0.95|| switch1.motion != motion_read 
@@ -164,9 +168,10 @@ void data_update (){
       switch1.motion = motion_read;
       switch1.button_state = button_state;
       switch1.button_count = button_count;
+      return true;
     }
   }
-
+  return false;
 }
 
 void setup() {
@@ -192,6 +197,7 @@ void loop() {
   if(msgReceived == 1)
     {
 //      This code will run whenever a message is received on the SUBSCRIBE_TOPIC_NAME Topic
+        switch1.msg_recv += 1;
         delay(100);
         msgReceived = 0;
         Serial.print("Received Message:");
@@ -208,15 +214,16 @@ void loop() {
          Serial.println("IF CONDITION");
          Serial.println("Turning Relay On");
          button_state = HIGH;
-        //  client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOn);
+         client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOn);
         }
         else 
         {
          Serial.println("ELSE CONDITION");
          Serial.println("Turning RElay Off");
          button_state = LOW;
-        //  client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOff);
+         client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOff);
         }
+      digitalWrite(RELAY,button_state);
       Serial.println("##############################################");
     }
   
@@ -233,18 +240,27 @@ void loop() {
   // client.publish(STATUS_TOPIC, jsonBuffer);
 
  
-// toggle relay base on its state
- digitalWrite(RELAY,button_state);
- // Update shadows according to the button state
+  // toggle relay base on its state
+  // if (button_state == HIGH){
+  //   Serial.print("button high");
+  // }
+  // else Serial.print('button low');
+
+//  digitalWrite(RELAY,button_state);
+
+//  Update shadows according to the button state
  if (button_state != switch1.button_state){
     if (button_state == HIGH) {
-    client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOn);
+      client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, onByButton);
  }
-    else client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, sndPayloadOff);
+    else {
+      client.publish(AWS_IOT_SHADOW_PUBLISH_TOPIC, offByButton);
+    }
  }
  
-  data_update();
-  publishMessage(switch1);
+  if(data_update()){
+    publishMessage(switch1);
+  } 
 
   client.loop();
   delay(500);
